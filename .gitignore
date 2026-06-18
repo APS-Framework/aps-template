@@ -1,0 +1,32 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Azure Functions
+local.settings.json
+**/local.settings.json
+appsettings.Development.local.json
+
+# Resultados y cobertura
+TestResults/
+coverage*.xml
+*.trx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# PowerShell
+*.ps1.xml
+
+# Ficheros generados por herramientas
+*.log
+.env
+.env.local
