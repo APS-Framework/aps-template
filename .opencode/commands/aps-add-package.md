@@ -1,7 +1,7 @@
 ---
 description: Anade un paquete APS Framework a un proyecto existente y configura el wiring basico. Uso: /aps-add-package <paquete> [ruta]
 agent: aps-scaffolder
-model: anthropic/claude-sonnet-4-20250514
+model: minimax/MiniMax-M3
 ---
 
 # /aps-add-package

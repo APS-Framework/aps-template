@@ -1,7 +1,7 @@
 ---
 description: Crea Azure Functions o ASP.NET Core Web Apps con paquetes APS Framework a partir de una descripcion en lenguaje natural. Detecta que paquetes instalar a partir de palabras clave, hace preguntas de aclaracion solo si falta info critica, y genera un scaffold limpio y compilable. Invocar con @aps-scaffolder o desde los commands /aps-new-function y /aps-new-webapp.
 mode: subagent
-model: anthropic/claude-sonnet-4-20250514
+model: minimax/MiniMax-M3
 temperature: 0.2
 permission:
   read: allow

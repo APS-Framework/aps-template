@@ -1,7 +1,7 @@
 ---
 description: Crea una nueva Azure Function con APS Framework a partir de una descripcion. Uso: /aps-new-function [nombre] [descripcion...]
 agent: aps-scaffolder
-model: anthropic/claude-sonnet-4-20250514
+model: minimax/MiniMax-M3
 ---
 
 # /aps-new-function

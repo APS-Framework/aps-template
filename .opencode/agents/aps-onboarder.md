@@ -1,7 +1,7 @@
 ---
 description: Onboarding del entorno local para un proyecto APS Framework. Detecta el repo y la org via 'gh repo view', valida acceso al feed NuGet de la organizacion, configura APS_NUGET_TOKEN como variable de usuario, detecta suscripcion de Azure si 'az' esta disponible, y crea/actualiza NuGet.config. Invocar con @aps-onboarder o desde el command /aps-onboard.
 mode: subagent
-model: anthropic/claude-sonnet-4-20250514
+model: minimax/MiniMax-M2.7-highspeed
 temperature: 0.2
 permission:
   read: allow
