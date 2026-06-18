@@ -4,22 +4,33 @@
     Onboarding del entorno local para un proyecto APS Framework.
 
 .DESCRIPTION
-    Detecta el contexto (repo, org, suscripcion Azure) y configura el
-    entorno para consumir paquetes APS desde GitHub Packages.
+    Conecta el entorno del desarrollador con la organizacion de GitHub
+    a la que pertenece el repo. Su alcance es deliberadamente MINIMO:
+
+      1. Verifica que `gh` CLI esta instalado y autenticado
+      2. Detecta el repo (owner/name) y la org con `gh repo view`
+      3. Anade el scope `read:packages` a la sesion gh
+      4. Valida el acceso al feed de GitHub Packages de la org
+      5. Configura APS_NUGET_TOKEN y GITHUB_TOKEN como variables de usuario
+      6. Genera/actualiza NuGet.config con la org detectada
+      7. Ajusta opencode.json para que el MCP discovery apunte a la org
+      8. Instala el MCP server (paquete `@APS-Framework/sdk-mcp-server`)
+         si no esta ya presente en la maquina
+
+    NO verifica dotnet SDK, Azure Functions Core Tools, Azure CLI ni
+    ejecuta `dotnet restore`. Esas validaciones corresponden a los
+    agentes de creacion de proyectos (aps-scaffolder) o al flujo de
+    despliegue (GitHub Actions), y se hacen bajo demanda cuando hacen
+    falta.
+
+    El acceso a Azure (CLI, suscripcion, login) **no debe necesitarse
+    nunca desde el entorno local**: el workflow de deploy de GitHub
+    Actions es quien gestiona las credenciales y la suscripcion de
+    Azure. Si necesitas desplegar desde local, replantear el flujo.
 
     Pensado para ser invocado por el subagent opencode 'aps-onboarder',
-    que aporta contexto, preguntas al usuario e interpretacion de errores.
-    Tambien se puede ejecutar directamente en una terminal.
-
-    Pasos:
-      1. Verifica prerequisitos (gh CLI, dotnet SDK, sesion gh activa)
-      2. Detecta el repo con 'gh repo view' (org, nombre, visibilidad)
-      3. Anade el scope 'read:packages' a la sesion gh
-      4. Valida acceso al feed de paquetes de la organizacion
-      5. Configura APS_NUGET_TOKEN y GITHUB_TOKEN como variables de usuario
-      6. Detecta suscripcion de Azure si 'az' CLI esta disponible
-      7. Crea NuGet.config en la raiz del repo si no existe
-      8. Valida la configuracion ejecutando 'dotnet restore'
+    que aporta contexto, preguntas al usuario e interpretacion de
+    errores. Tambien se puede ejecutar directamente en una terminal.
 
     Output estructurado con prefijos [OK], [WARN], [ERROR], [SKIP], [INFO]
     para que el subagent opencode pueda parsearlo facilmente.
@@ -33,17 +44,39 @@
 .PARAMETER SkipNuGetConfig
     No crea ni modifica NuGet.config.
 
-.PARAMETER SkipRestore
-    No ejecuta 'dotnet restore' al final.
+.PARAMETER SkipMcp
+    No ajusta opencode.json (MCP discovery).
 
-.PARAMETER SkipAzure
-    No detecta la suscripcion de Azure aunque 'az' este disponible.
+.PARAMETER SkipFeedValidation
+    No intenta validar el acceso al feed de la organizacion.
+
+.PARAMETER Topic
+    Topic del MCP discovery para la org del repo. Por defecto se usa el
+    nombre del repo. Aplica solo si la org del repo es diferente de
+    `APS-Framework` (en ese caso, el discovery `APS-Framework:aps-framework`
+    siempre se conserva y se anade el de la org del repo).
+
+.PARAMETER SkipMcpServer
+    No instala ni actualiza el paquete npm `@APS-Framework/sdk-mcp-server`.
+    Por defecto se instala si no esta presente.
+
+.PARAMETER StartMcpServer
+    Ademas de instalar el paquete (si no esta), arranca `sdk-mcp-server`
+    en segundo plano tras la instalacion. Pensado para cuando el usuario
+    ha consentido explicitamente arrancarlo desde el agente.
+    Implica instalar (no usar junto con `-SkipMcpServer`).
+
+.PARAMETER RepoRoot
+    Ruta al repo. Si se omite, se usa el directorio actual.
 
 .EXAMPLE
     pwsh ./scripts/setup-nuget.ps1
 
 .EXAMPLE
-    pwsh ./scripts/setup-nuget.ps1 -Org APS-Framework -SkipAzure
+    pwsh ./scripts/setup-nuget.ps1 -Org MiOrg
+
+.EXAMPLE
+    pwsh ./scripts/setup-nuget.ps1 -SkipMcp -SkipFeedValidation
 
 .NOTES
     Requiere PowerShell 7+. Funciona en Windows, Linux y macOS.
@@ -53,8 +86,12 @@ param(
     [string]$Org = "",
     [switch]$SkipEnvVars,
     [switch]$SkipNuGetConfig,
-    [switch]$SkipRestore,
-    [switch]$SkipAzure
+    [switch]$SkipMcp,
+    [switch]$SkipFeedValidation,
+    [string]$Topic = "",
+    [switch]$SkipMcpServer,
+    [switch]$StartMcpServer,
+    [string]$RepoRoot = (Get-Location).Path
 )
 
 $ErrorActionPreference = "Stop"
@@ -65,16 +102,16 @@ function Write-Step {
     Write-Host "== $Message ==" -ForegroundColor Cyan
 }
 
-function Write-Ok      { param([string]$Message) Write-Host "[OK] $Message" -ForegroundColor Green }
-function Write-Skip    { param([string]$Message) Write-Host "[SKIP] $Message" -ForegroundColor DarkGray }
-function Write-Warn2   { param([string]$Message) Write-Host "[WARN] $Message" -ForegroundColor Yellow }
-function Write-Err     { param([string]$Message) Write-Host "[ERROR] $Message" -ForegroundColor Red }
-function Write-Info    { param([string]$Message) Write-Host "[INFO] $Message" -ForegroundColor Gray }
+function Write-Ok    { param([string]$Message) Write-Host "[OK] $Message" -ForegroundColor Green }
+function Write-Skip  { param([string]$Message) Write-Host "[SKIP] $Message" -ForegroundColor DarkGray }
+function Write-Warn2 { param([string]$Message) Write-Host "[WARN] $Message" -ForegroundColor Yellow }
+function Write-Err   { param([string]$Message) Write-Host "[ERROR] $Message" -ForegroundColor Red }
+function Write-Info  { param([string]$Message) Write-Host "[INFO] $Message" -ForegroundColor Gray }
 
 # ===========================================================================
-# 1. Prerequisitos
+# 1. gh CLI (unico prerequisito del onboarding general)
 # ===========================================================================
-Write-Step "Prerequisitos"
+Write-Step "gh CLI"
 
 try {
     $ghVersion = (gh --version 2>&1 | Select-Object -First 1) -replace 'gh version ', ''
@@ -84,84 +121,61 @@ try {
     exit 1
 }
 
-try {
-    $dotnetVersion = (& dotnet --version 2>&1) -replace "`r`n", ''
-    if ($dotnetVersion -notmatch '^[89]\.|^10\.') {
-        Write-Warn2 "dotnet SDK $dotnetVersion. Recomendado: 8.x o 10.x"
-    } else {
-        Write-Ok "dotnet SDK $dotnetVersion"
-    }
-} catch {
-    Write-Err "dotnet SDK no esta instalado. Instalar desde https://dotnet.microsoft.com/download"
-    exit 1
-}
-
-# Func tools (opcional pero habitual en proyectos APS)
-try {
-    $funcVersion = (func --version 2>&1 | Select-Object -First 1) -replace "`r`n", ''
-    Write-Ok "Azure Functions Core Tools $funcVersion"
-} catch {
-    Write-Skip "Azure Functions Core Tools no detectado (solo necesario si vas a crear Function Apps)"
-}
-
-# ===========================================================================
-# 2. Contexto de GitHub (repo, org, usuario)
-# ===========================================================================
-Write-Step "Contexto de GitHub"
-
 $ghStatus = gh auth status 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Err "No hay sesion activa de gh. Ejecuta: gh auth login"
     exit 1
 }
+Write-Ok "Sesion gh activa"
 
 $ghUser = (gh api user --jq '.login' 2>&1) -replace "`r`n", ''
 if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($ghUser)) {
-    Write-Ok "Usuario GitHub: $ghUser"
+    Write-Info "Usuario GitHub: $ghUser"
 } else {
     Write-Warn2 "No se pudo obtener el usuario de GitHub"
 }
 
-# Detectar repo via 'gh repo view' (mas robusto que parsear git remote)
+# ===========================================================================
+# 2. Contexto de GitHub (repo, org)
+# ===========================================================================
+Write-Step "Contexto de GitHub"
+
 $repoJson = gh repo view --json owner,name,isInOrganization,visibility,defaultBranchRef,url 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Warn2 "No se detecto un repo de GitHub en el directorio actual"
-    Write-Info "  (esperado si se ejecuta fuera de un repo clonado)"
-} else {
-    try {
-        $repo = $repoJson | ConvertFrom-Json
-        $repoOwner = $repo.owner.login
-        $repoName = $repo.name
-        $isOrg = $repo.isInOrganization
-        $visibility = $repo.visibility
-        $url = $repo.url
-
-        Write-Ok "Repo: $repoOwner/$repoName ($visibility)"
-        Write-Info "  $url"
-
-        # Determinar la org: si es repo de organizacion, es esa; si es personal, es el owner
-        if (-not [string]::IsNullOrWhiteSpace($Org)) {
-            Write-Info "Org proporcionada por parametro: $Org (override)"
-        } elseif ($isOrg) {
-            $Org = $repoOwner
-            Write-Ok "Organizacion (repo pertenece a org): $Org"
-        } else {
-            $Org = $repoOwner
-            Write-Info "Repo personal. Owner usado como org: $Org"
-        }
-    } catch {
-        Write-Warn2 "No se pudo parsear la salida de 'gh repo view': $_"
-    }
+    Write-Err "No se detecta un repo de GitHub en el directorio actual."
+    Write-Info "  El onboarding solo funciona dentro de un repo clonado con gh."
+    exit 1
 }
 
-# Override manual si no se detecto org
-if ([string]::IsNullOrWhiteSpace($Org)) {
-    if ($args -and $args[0]) {
-        $Org = $args[0]
-        Write-Info "Org usada de argumento posicional: $Org"
+try {
+    $repo = $repoJson | ConvertFrom-Json
+    $repoOwner = $repo.owner.login
+    $repoName = $repo.name
+    $isOrg = $repo.isInOrganization
+    $visibility = $repo.visibility
+    $url = $repo.url
+
+    Write-Ok "Repo: $repoOwner/$repoName ($visibility)"
+    Write-Info "  $url"
+
+    # Determinar la org: si es repo de organizacion, es esa; si es personal, es el owner
+    if (-not [string]::IsNullOrWhiteSpace($Org)) {
+        Write-Info "Org proporcionada por parametro: $Org (override)"
+    } elseif ($isOrg) {
+        $Org = $repoOwner
+        Write-Ok "Organizacion (repo pertenece a org): $Org"
     } else {
-        Write-Warn2 "No se detecto organizacion. Usar -Org <nombre> o ejecutar dentro de un repo clonado."
+        $Org = $repoOwner
+        Write-Info "Repo personal. Owner usado como org: $Org"
     }
+} catch {
+    Write-Err "No se pudo parsear la salida de 'gh repo view': $_"
+    exit 1
+}
+
+if ([string]::IsNullOrWhiteSpace($Org)) {
+    Write-Err "No se detecto organizacion. Usar -Org <nombre>."
+    exit 1
 }
 
 # ===========================================================================
@@ -179,13 +193,13 @@ if ($LASTEXITCODE -ne 0) {
 # ===========================================================================
 # 4. Validacion de acceso al feed de la organizacion
 # ===========================================================================
-if (-not [string]::IsNullOrWhiteSpace($Org)) {
+if ($SkipFeedValidation) {
+    Write-Skip "Validacion de feed omitida (-SkipFeedValidation)"
+} else {
     Write-Step "Validando acceso al feed de $Org"
 
     $headersJson = gh api /user/packages --include 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) {
-        # gh api /user/packages no falla por 401 si el token es valido,
-        # pero no da info sobre la org. Probamos con /orgs/{org}/packages.
         $orgPackages = gh api "/orgs/$Org/packages?package_type=nuget" 2>&1 | Out-String
         if ($LASTEXITCODE -eq 0) {
             Write-Ok "Acceso verificado al feed NuGet de $Org"
@@ -200,8 +214,6 @@ if (-not [string]::IsNullOrWhiteSpace($Org)) {
     } else {
         Write-Warn2 "No se pudo consultar /user/packages. Token posiblemente invalido."
     }
-} else {
-    Write-Skip "Validacion de feed omitida (sin org)"
 }
 
 # ===========================================================================
@@ -224,7 +236,7 @@ if (-not $SkipEnvVars) {
 
     Write-Info "Abre una nueva terminal para que las variables esten disponibles en la sesion actual."
 
-    # Hacer visibles para el restore de este proceso
+    # Hacer visibles para procesos hijos (e.g. el restore lo hara el scaffolder)
     $env:APS_NUGET_TOKEN = $token
     $env:GITHUB_TOKEN = $token
 } else {
@@ -232,55 +244,15 @@ if (-not $SkipEnvVars) {
 }
 
 # ===========================================================================
-# 6. Deteccion de Azure (opcional, solo si 'az' esta disponible)
-# ===========================================================================
-if (-not $SkipAzure) {
-    Write-Step "Suscripcion de Azure"
-
-    try {
-        $azVersion = (az --version 2>&1 | Select-Object -First 1) -replace "`r`n", ''
-        Write-Ok "Azure CLI detectado: $azVersion"
-
-        $accountJson = az account show 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) {
-            try {
-                $account = $accountJson | ConvertFrom-Json
-                $subId = $account.id
-                $subName = $account.name
-                $tenantId = $account.tenantId
-                $userName = $account.user.name
-
-                Write-Ok "Suscripcion activa: $subName ($subId)"
-                Write-Info "  Tenant: $tenantId"
-                Write-Info "  Usuario: $userName"
-            } catch {
-                Write-Warn2 "No se pudo parsear la salida de 'az account show': $_"
-            }
-        } else {
-            Write-Warn2 "'az' instalado pero no autenticado. Ejecuta: az login"
-        }
-    } catch {
-        Write-Skip "Azure CLI no instalado. Si no vas a desplegar a Azure, puedes ignorar este aviso."
-    }
-} else {
-    Write-Skip "Deteccion de Azure omitida (-SkipAzure)"
-}
-
-# ===========================================================================
-# 7. NuGet.config
+# 6. NuGet.config
 # ===========================================================================
 if (-not $SkipNuGetConfig) {
     Write-Step "NuGet.config"
 
-    $nugetConfigPath = Join-Path (Get-Location) "NuGet.config"
+    $nugetConfigPath = Join-Path $RepoRoot "NuGet.config"
 
-    if (Test-Path $nugetConfigPath) {
-        Write-Skip "NuGet.config ya existe en $nugetConfigPath (no se modifica)"
-    } elseif ([string]::IsNullOrWhiteSpace($Org)) {
-        Write-Warn2 "No se puede crear NuGet.config sin organizacion. Pasa -Org."
-    } else {
-        $feedUrl = "https://nuget.pkg.github.com/$Org/index.json"
-        $content = @"
+    $feedUrl = "https://nuget.pkg.github.com/$Org/index.json"
+    $content = @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <packageSources>
@@ -296,40 +268,241 @@ if (-not $SkipNuGetConfig) {
   </packageSourceCredentials>
 </configuration>
 "@
+
+    if (Test-Path $nugetConfigPath) {
+        $existing = Get-Content $nugetConfigPath -Raw
+        if ($existing -eq $content) {
+            Write-Skip "NuGet.config ya coincide con la org $Org (sin cambios)"
+        } else {
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($nugetConfigPath, $content, $utf8NoBom)
+            Write-Ok "NuGet.config sobrescrito en $nugetConfigPath"
+        }
+    } else {
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
         [System.IO.File]::WriteAllText($nugetConfigPath, $content, $utf8NoBom)
         Write-Ok "NuGet.config creado en $nugetConfigPath"
-        Write-Info "  Feed privado: $feedUrl"
     }
+    Write-Info "  Feed privado: $feedUrl"
 } else {
-    Write-Skip "Creacion de NuGet.config omitida (-SkipNuGetConfig)"
+    Write-Skip "Creacion/actualizacion de NuGet.config omitida (-SkipNuGetConfig)"
 }
 
 # ===========================================================================
-# 8. Validacion con dotnet restore
+# 7. opencode.json (MCP discovery)
 # ===========================================================================
-if (-not $SkipRestore) {
-    Write-Step "Validacion con dotnet restore"
+if ($SkipMcp) {
+    Write-Skip "Ajuste de opencode.json omitido (-SkipMcp)"
+} else {
+    Write-Step "opencode.json (MCP)"
 
-    $csprojFiles = Get-ChildItem -Path . -Recurse -Filter "*.csproj" -ErrorAction SilentlyContinue
-    if (-not $csprojFiles -or $csprojFiles.Count -eq 0) {
-        Write-Skip "No hay .csproj en el repo todavia (esperado en primer setup)"
+    $opencodePath = Join-Path $RepoRoot "opencode.json"
+    if (-not (Test-Path $opencodePath)) {
+        Write-Warn2 "opencode.json no existe en $RepoRoot. Saltando ajuste de MCP."
     } else {
-        $restoreOutput = dotnet restore 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn2 "dotnet restore finalizo con errores:"
-            Write-Host $restoreOutput
-            Write-Host ""
-            Write-Host "Diagnostico:" -ForegroundColor Yellow
-            Write-Host "  401/403            Token sin scope 'read:packages' o sin acceso a la org"
-            Write-Host "  NU1101 (paquete)   El paquete/ version no existe en el feed"
-            Write-Host "  Conexion           Verifica que la URL del feed es correcta (https://nuget.pkg.github.com/$Org/index.json)"
-        } else {
-            Write-Ok "dotnet restore OK"
+        try {
+            $opencode = Get-Content $opencodePath -Raw | ConvertFrom-Json
+            $mcp = $opencode.mcp
+            if (-not $mcp) {
+                Write-Skip "opencode.json no tiene bloque 'mcp'. Sin cambios."
+            } else {
+                $changed = $false
+                foreach ($mcpName in @($mcp.PSObject.Properties.Name)) {
+                    $entry = $mcp.$mcpName
+                    if ($entry.type -ne 'remote' -or [string]::IsNullOrWhiteSpace($entry.url)) { continue }
+
+                    $uri = [Uri]$entry.url
+                    $query = [System.Web.HttpUtility]::ParseQueryString($uri.Query)
+
+                    # Preservar parametros que no son discovery (e.g. exclude, ...).
+                    $preserved = @{}
+                    foreach ($k in @($query.Keys)) {
+                        if ($k -ne 'discovery') {
+                            $preserved[$k] = @($query[$k])
+                        }
+                    }
+
+                    # Conservar `APS-Framework:aps-framework` si ya estaba presente.
+                    # Es el namespace canonico del framework APS y debe estar siempre disponible.
+                    $apsFrameworkDiscovery = $null
+                    foreach ($d in @($query.GetValues('discovery'))) {
+                        if ($d -eq 'APS-Framework:aps-framework') {
+                            $apsFrameworkDiscovery = $d
+                            break
+                        }
+                    }
+
+                    # Construir la lista final de discovery:
+                    #  1) `APS-Framework:aps-framework` si estaba en el URL original.
+                    #  2) La org del repo, solo si es diferente de `APS-Framework`.
+                    $newDiscoveries = @()
+                    if ($apsFrameworkDiscovery) {
+                        $newDiscoveries += $apsFrameworkDiscovery
+                    }
+                    if ($Org -ne 'APS-Framework') {
+                        $effectiveTopic = if (-not [string]::IsNullOrWhiteSpace($Topic)) { $Topic } else { $repoName }
+                        $newDiscoveries += "$Org`:$effectiveTopic"
+                    }
+
+                    # Quitar TODOS los discovery= previos y re-anadir solo los finales.
+                    $query.Remove('discovery')
+                    foreach ($d in $newDiscoveries) {
+                        $query.Add('discovery', $d)
+                    }
+
+                    # Reconstruir query string preservando orden: discovery primero, luego el resto.
+                    # Sin UrlEncode para no escapar ':' y '/', como en el URL original.
+                    $pairs = @()
+                    foreach ($d in $newDiscoveries) {
+                        $pairs += "discovery=$d"
+                    }
+                    foreach ($k in $preserved.Keys) {
+                        foreach ($v in $preserved[$k]) {
+                            $pairs += "$k=$v"
+                        }
+                    }
+                    $newQuery = ($pairs -join '&')
+                    $newUrl = "{0}://{1}{2}{3}" -f $uri.Scheme, $uri.Authority, $uri.AbsolutePath, ($(if ($newQuery) { "?" + $newQuery } else { '' }))
+
+                    if ($newUrl -ne $entry.url) {
+                        $entry.url = $newUrl
+                        $changed = $true
+                        $discList = ($newDiscoveries -join ', ')
+                        Write-Ok "MCP '$mcpName': discovery ajustado a: $discList"
+                    } else {
+                        Write-Skip "MCP '$mcpName': discovery ya correcto"
+                    }
+                }
+
+                                if ($changed) {
+                                    $json = $opencode | ConvertTo-Json -Depth 10
+                                    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+                                    [System.IO.File]::WriteAllText($opencodePath, $json, $utf8NoBom)
+                                    Write-Ok "opencode.json actualizado en $opencodePath"
+                                    Write-Warn2 "ATENCION: si tienes opencode en otra terminal, REINICIALO para que el nuevo MCP discovery tenga efecto."
+                                }
+            }
+        } catch {
+            Write-Warn2 "No se pudo ajustar opencode.json: $_"
         }
     }
+}
+
+# ===========================================================================
+# 8. MCP server (paquete @APS-Framework/sdk-mcp-server)
+# ===========================================================================
+# El binario `sdk-mcp-server` viene del feed npm de APS-Framework en
+# GitHub Packages. Sin el, el MCP discovery configurado arriba no
+# tiene efecto. Lo instalamos globalmente si no esta presente.
+if ($SkipMcpServer) {
+    Write-Skip "Instalacion del MCP server omitida (-SkipMcpServer)"
 } else {
-    Write-Skip "dotnet restore omitido (-SkipRestore)"
+    Write-Step "MCP server (sdk-mcp-server)"
+
+    $mcpCmd = Get-Command sdk-mcp-server -ErrorAction SilentlyContinue
+    $installSucceeded = $false
+
+    if ($mcpCmd) {
+        Write-Ok "sdk-mcp-server ya instalado en $($mcpCmd.Source)"
+        $installSucceeded = $true
+    } else {
+        # Comprobar Node.js (prerequisite del paquete)
+        $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+        $npmCmd  = Get-Command npm  -ErrorAction SilentlyContinue
+        if (-not $nodeCmd) {
+            Write-Warn2 "Node.js no esta instalado. No se puede instalar sdk-mcp-server."
+            Write-Info "  Instala Node.js >= 18 desde https://nodejs.org y vuelve a correr este script."
+        } elseif (-not $npmCmd) {
+            Write-Warn2 "npm no esta disponible. No se puede instalar sdk-mcp-server."
+        } else {
+            $nodeVersion = (node --version 2>&1) -replace '^v', ''
+            $nodeMajor = 0
+            if ($nodeVersion -match '^(\d+)\.') { $nodeMajor = [int]$Matches[1] }
+            if ($nodeMajor -lt 18) {
+                Write-Warn2 "Node.js $nodeVersion detectado, se requiere >= 18 para sdk-mcp-server."
+                Write-Info "  Actualiza Node.js desde https://nodejs.org y vuelve a correr este script."
+            } else {
+                Write-Info "Node.js $nodeVersion, npm disponible"
+                Write-Info "Instalando paquete @APS-Framework/sdk-mcp-server desde GitHub Packages..."
+
+                $token = gh auth token 2>&1
+                if ([string]::IsNullOrWhiteSpace($token)) {
+                    Write-Warn2 "No se pudo obtener el token de gh. No se puede instalar sdk-mcp-server."
+                } else {
+                    # .npmrc temporal para autenticar contra GitHub Packages sin
+                    # tocar la configuracion global del usuario.
+                    $rc = Join-Path $env:TEMP "npmrc-aps-bootstrap.txt"
+                    $npmrcContent = @"
+@aps-framework:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=$token
+always-auth=true
+"@
+                    try {
+                        Set-Content -Path $rc -Value $npmrcContent -NoNewline
+                        $env:NPM_CONFIG_USERCONFIG = $rc
+                        $output = npm install -g @APS-Framework/sdk-mcp-server 2>&1
+                        if ($LASTEXITCODE -eq 0) {
+                            $installed = Get-Command sdk-mcp-server -ErrorAction SilentlyContinue
+                            if ($installed) {
+                                Write-Ok "sdk-mcp-server instalado en $($installed.Source)"
+                                $installSucceeded = $true
+                            } else {
+                                Write-Warn2 "npm finalizo OK pero sdk-mcp-server no esta en PATH."
+                                Write-Info "  Reinicia esta terminal para que se propague el PATH antes de continuar."
+                            }
+                        } else {
+                            Write-Warn2 "La instalacion de sdk-mcp-server fallo. Salida de npm:"
+                            $output | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkYellow }
+                        }
+                    } finally {
+                        Remove-Item -Path $rc -Force -ErrorAction SilentlyContinue
+                    }
+                }
+            }
+        }
+    }
+
+    # Si el usuario consintio arrancar (flag -StartMcpServer), hacerlo ahora.
+    if ($StartMcpServer) {
+        if (-not $installSucceeded) {
+            Write-Warn2 "No se puede arrancar sdk-mcp-server: la instalacion fallo o no se realizo."
+        } else {
+            # Refrescar el lookup por si PATH se actualizo en esta misma sesion.
+            $mcpCmd = Get-Command sdk-mcp-server -ErrorAction SilentlyContinue
+            if (-not $mcpCmd) {
+                Write-Warn2 "sdk-mcp-server esta instalado pero no se encuentra en el PATH actual."
+                Write-Info "  Cierra y abre una nueva terminal, luego ejecuta: sdk-mcp-server"
+            } else {
+                Write-Info "Arrancando sdk-mcp-server en segundo plano..."
+                try {
+                    $outLog = Join-Path $env:TEMP "sdk-mcp-server.out.log"
+                    $errLog = Join-Path $env:TEMP "sdk-mcp-server.err.log"
+                    if (-not (Test-Path $outLog)) { New-Item -ItemType File -Path $outLog -Force | Out-Null }
+                    if (-not (Test-Path $errLog)) { New-Item -ItemType File -Path $errLog -Force | Out-Null }
+                    $proc = Start-Process -FilePath "sdk-mcp-server" -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
+                    if ($proc -and $proc.Id) {
+                        Write-Ok "sdk-mcp-server arrancado en segundo plano (PID $($proc.Id))"
+                        Write-Info "  Logs: $outLog / $errLog"
+                        Write-Warn2 "ATENCION: si tienes opencode en otra terminal, REINICIALO para que se conecte al server."
+                    } else {
+                        Write-Warn2 "No se pudo arrancar sdk-mcp-server (no se obtuvo PID)."
+                    }
+                } catch {
+                    Write-Warn2 "Error arrancando sdk-mcp-server: $_"
+                }
+            }
+        }
+    }
+
+    # Informar de la config de usuario (Paso 2 de la guia MCP)
+    $userMcpConfig = Join-Path $env:USERPROFILE ".mcp.json"
+    if (Test-Path $userMcpConfig) {
+        Write-Info "Config MCP de usuario existente: $userMcpConfig (no se modifica)"
+    } else {
+        Write-Info "No existe $userMcpConfig. Creala manualmente si quieres una config MCP de usuario."
+        Write-Info "  Plantilla:"
+        Write-Info '  { "servers": { "aps": { "type": "http", "url": "http://127.0.0.1:7512/mcp?discovery=APS-Framework:aps-framework" } } }'
+    }
 }
 
 # ===========================================================================
@@ -338,14 +511,55 @@ if (-not $SkipRestore) {
 Write-Step "Onboarding completado"
 Write-Host ""
 Write-Host "Resumen:" -ForegroundColor Green
-Write-Host "  Org detectada:  $($Org ?? '(ninguna)')"
-Write-Host "  Feed NuGet:     $(if ($Org) { "https://nuget.pkg.github.com/$Org/index.json" } else { '(no configurado)' })"
-Write-Host "  Token GitHub:   $(if (gh auth token 2>$null) { 'configurado (APS_NUGET_TOKEN)' } else { 'NO configurado' })"
-Write-Host "  Azure CLI:      $(if (Get-Command az -ErrorAction SilentlyContinue) { 'disponible' } else { 'no instalado' })"
+Write-Host "  Repo:              $repoOwner/$repoName ($visibility)"
+Write-Host "  Org detectada:     $Org"
+Write-Host "  Feed NuGet:        https://nuget.pkg.github.com/$Org/index.json"
+Write-Host "  Token GitHub:      $(if (gh auth token 2>$null) { 'configurado (APS_NUGET_TOKEN)' } else { 'NO configurado' })"
+Write-Host "  NuGet.config:      $(if (Test-Path (Join-Path $RepoRoot 'NuGet.config')) { 'generado' } else { 'no generado' })"
+Write-Host "  opencode.json:     $(if ($SkipMcp) { 'no modificado' } else { 'ajustado' })"
+$mcpStatus = if ($SkipMcpServer) { 'no verificado' } elseif (Get-Command sdk-mcp-server -ErrorAction SilentlyContinue) { 'instalado' } else { 'NO instalado' }
+Write-Host "  MCP server:        $mcpStatus"
+Write-Host "  MCP server run:    $(if ($StartMcpServer) { 'intentado en background' } else { 'no solicitado' })"
+
+# Avisos prominentes al final (que el agente pueda parsear facilmente)
+Write-Host ""
+Write-Host "Avisos de reinicio:" -ForegroundColor Yellow
+$needsTerminalRestart = $false
+$needsOpencodeRestart = $false
+# Si se instalo el MCP server en esta misma sesion, el binario estara
+# en PATH para este proceso pero otras terminales no lo veran hasta
+# que abran una nueva (o recarguen el perfil).
+if ($installSucceeded -and -not $mcpCmd) {
+    $needsTerminalRestart = $true
+}
+if (-not $SkipMcp) {
+    # opencode.json fue ajustado en este run, hace falta reiniciar opencode
+    $needsOpencodeRestart = $true
+}
+if ($StartMcpServer) {
+    # Si arrancamos el server, opencode debe reconectarse
+    $needsOpencodeRestart = $true
+}
+if ($needsTerminalRestart) {
+    Write-Host "  - Abre una NUEVA terminal para que el PATH con sdk-mcp-server se propague." -ForegroundColor Yellow
+}
+if ($needsOpencodeRestart) {
+    Write-Host "  - REINICIA opencode (Ctrl+C y vuelve a abrir) para que aplique el MCP discovery y/o se conecte al server." -ForegroundColor Yellow
+}
+if (-not $needsTerminalRestart -and -not $needsOpencodeRestart) {
+    Write-Host "  (ninguno)" -ForegroundColor Gray
+}
 
 Write-Host ""
 Write-Host "Siguientes pasos:" -ForegroundColor Green
-Write-Host "  1. Abre una nueva terminal para que las variables esten disponibles"
+Write-Host "  1. Abre una nueva terminal para que APS_NUGET_TOKEN este disponible"
 Write-Host "  2. Verifica: dotnet nuget list source"
-Write-Host "  3. Crea tu primera Function:  /aps-new-function MiFunction"
-Write-Host "  4. Crea tu primera Web App:   /aps-new-webapp MiApi"
+if ($StartMcpServer) {
+    Write-Host "  3. El MCP server ya esta corriendo (PID en el resumen)"
+} else {
+    Write-Host "  3. Si vas a usar el MCP ahora: ejecuta 'sdk-mcp-server' (o 'pm2 start sdk-mcp-server')"
+}
+Write-Host "  4. REINICIA opencode para aplicar cambios (Ctrl+C y reabrir)"
+Write-Host "  5. Antes de crear un proyecto, asegurate de tener dotnet 8.x/10.x instalado"
+Write-Host "  6. Crea tu primera Function:  /aps-new-function MiFunction"
+Write-Host "  7. Crea tu primera Web App:   /aps-new-webapp MiApi"

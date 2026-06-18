@@ -109,8 +109,12 @@ el agente (o el template) haga automaticamente. Depende de:
 
 - La organizacion a la que pertenece el repo
 - La cuenta de GitHub del desarrollador
-- La suscripcion de Azure donde se desplegara
 - Las credenciales disponibles (Classic PAT con `read:packages`)
+
+**Importante**: el acceso a Azure (CLI, suscripcion, login) **no debe
+necesitarse nunca desde el entorno local**. El workflow de deploy de
+GitHub Actions es quien gestiona credenciales y suscripcion. Si algo
+parece requerirlo desde local, replantear el flujo.
 
 **Regla dura**: Ningun agente opencode debe auto-ejecutar el setup de
 NuGet. El usuario debe correr explicitamente `/aps-onboard` o
@@ -121,20 +125,38 @@ NuGet. El usuario debe correr explicitamente `/aps-onboard` o
 - `gh` CLI instalado y autenticado (`gh auth login`)
 - Scope `read:packages` anadido a la sesion (`gh auth refresh --scopes "read:packages"`)
 - Variable de entorno `APS_NUGET_TOKEN` apuntando al token de la sesion `gh`
-- `dotnet` SDK 8.x o 10.x
 
 ### Que hace `/aps-onboard` (cuando el usuario lo invoca)
 
-1. Verifica prerequisitos (gh, dotnet)
-2. Refresca scopes de gh
-3. Configura `APS_NUGET_TOKEN` y `GITHUB_TOKEN` en variables de usuario
-4. Detecta la org desde `git remote get-url origin`
-5. Sobrescribe el `NuGet.config` con la org detectada
-6. Valida con `dotnet restore`
+1. Verifica que `gh` CLI esta instalado y autenticado
+2. Detecta el repo (owner/name) y la org con `gh repo view`
+3. Anade el scope `read:packages` a la sesion gh
+4. Valida el acceso al feed de GitHub Packages de la org
+5. Configura `APS_NUGET_TOKEN` y `GITHUB_TOKEN` como variables de usuario
+6. Genera/actualiza `NuGet.config` con la org detectada
+7. Ajusta `opencode.json` para que el MCP discovery apunte a la org
+   (conservando siempre `APS-Framework:aps-framework` y, si la org del
+   repo es diferente, anadiendo `discovery={Org}:{topic}`)
+8. Instala el MCP server (`@APS-Framework/sdk-mcp-server`) si no esta
+   presente en la maquina. Requiere Node.js >= 18. Se autentica contra
+   el feed npm de GitHub Packages con el token de `gh`. Si el usuario
+   consiente (flag `-StartMcpServer`), tambien lo arranca en segundo
+   plano. Tras esto, el usuario debe **reiniciar opencode** para
+   que aplique el nuevo MCP discovery y/o se conecte al server
 
-Tras ejecutarlo, **abrir una nueva terminal** para que las variables
-esten disponibles. Hasta entonces, el `NuGet.config` del template
-seguira con placeholders y los restores fallaran.
+**El onboarding NO valida `dotnet`, `func` ni `az`**. Esas
+herramientas las verifica el agente que las necesita:
+
+- `aps-scaffolder` valida `dotnet` (y `func` si va a crear una
+  Function App) y ejecuta `dotnet restore` al crear el proyecto.
+- El agente de despliegue valida `az` y la suscripcion cuando se va
+  a desplegar (o lo hace el workflow de GitHub Actions).
+
+Tras ejecutar el onboarding, **abrir una nueva terminal** para que las
+variables de entorno esten disponibles. Ademas, si `opencode.json`
+cambio, **reiniciar opencode** para que el nuevo MCP discovery tenga
+efecto. Hasta entonces, el `NuGet.config` del template seguira con
+placeholders y los restores fallaran.
 
 ## NuGet.config (obligatorio para paquetes APS)
 
@@ -198,8 +220,9 @@ Y un `Program.cs` que los active. Ver skills `aps-function-template` y
 1. **No** ejecutar `dotnet new` para reutilizar plantillas de Microsoft; usar
    solo las plantillas de `aps-function-template` o `aps-webapp-template`.
 2. **No** hacer commit ni push.
-3. **No** modificar archivos fuera del scope del comando (salvo `.gitignore`
-   y `NuGet.config` si faltan y el proyecto los necesita).
+3. **No** modificar archivos fuera del scope del comando (salvo
+   `.gitignore`, `Directory.Build.props` y `NuGet.config` en la raiz
+   si faltan y el proyecto los necesita).
 4. Si el directorio destino ya existe, **abortar y avisar**.
 5. Si el proyecto destino es un repo existente con `.sln`, anadir el
    nuevo proyecto al `.sln` (`dotnet sln <sln> add <csproj>`). Si no hay

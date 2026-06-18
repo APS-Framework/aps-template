@@ -17,7 +17,7 @@ paquetes de APS Framework, a partir de la descripcion del usuario.
 
 ## Comportamiento
 
-Cargar skill `aps-scaffolder` (subagent) con el procedimiento completo.
+Cargar subagent `aps-scaffolder` con el procedimiento completo.
 Ademas:
 
 - **Tipo de proyecto**: Function App (siempre)

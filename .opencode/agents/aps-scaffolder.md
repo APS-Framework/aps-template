@@ -1,5 +1,5 @@
 ---
-description: Crea Azure Functions o ASP.NET Core Web Apps con paquetes APS Framework a partir de una descripcion en lenguaje natural. Detecta que paquetes instalar a partir de palabras clave, hace preguntas de aclaracion solo si falta info critica, y genera un scaffold limpio y compilable. Invocar con @aps-scaffolder o desde los commands /aps-new-function y /aps-new-webapp.
+description: Crea Azure Functions o ASP.NET Core Web Apps con paquetes APS Framework a partir de una descripcion en lenguaje natural. Detecta que paquetes instalar a partir de palabras clave, hace preguntas de aclaracion solo si falta info critica, y genera un scaffold limpio y compilable. Invocar con @aps-scaffolder o desde los commands /aps-new-function, /aps-new-webapp y /aps-add-package.
 mode: subagent
 model: minimax/MiniMax-M3
 temperature: 0.2
@@ -45,6 +45,36 @@ Antes de empezar, cargar las skills relevantes:
 - **Para Function App**: `aps-function-template`
 - **Para Web App**: `aps-webapp-template`
 - **Para `/aps-add-package`**: `aps-conventions` + el template correspondiente al tipo de proyecto destino
+
+### 1b. Verificar herramientas necesarias
+
+El onboarding (`/aps-onboard`) no chequea `dotnet` ni `func`. Como
+este agente SI las necesita, **verificar ANTES de empezar**:
+
+```bash
+dotnet --version
+```
+
+- Si falla o no es `8.x`/`10.x`: **abortar y avisar** al usuario que
+  instale el SDK de .NET antes de continuar. No se puede compilar
+  nada sin el.
+
+Para Function Apps, ademas:
+
+```bash
+func --version
+```
+
+- Si falla: **abortar y avisar** al usuario que instale Azure
+  Functions Core Tools 4.x (`winget install
+  Microsoft.AzureFunctionsCoreTools`, `brew install
+  azure-functions-core-tools@4`, etc.) antes de continuar.
+
+Para Web Apps no hace falta `func` ni `az` en este punto.
+
+Si todas las herramientas necesarias estan presentes, continuar al
+paso 2. Si faltan, **abortar limpio** y mostrar al usuario los
+comandos de instalacion exactos para su SO.
 
 ### 2. Recopilar informacion del usuario
 
@@ -134,16 +164,16 @@ dotnet sln [sln] add [csproj-tests]
 
 **Comprobar primero si el entorno esta conectado a un feed APS**:
 
-```bash
+```powershell
 # Solo intenta restore si el token esta configurado
-if [ -n "$APS_NUGET_TOKEN" ]; then
+if ($env:APS_NUGET_TOKEN) {
   dotnet restore [csproj-src]
   dotnet build [csproj-src]
   dotnet test [csproj-tests]
-else
+} else {
   # Sin token: saltar restore (fallaria con 401) y avisar al usuario
-  echo "[SKIP] APS_NUGET_TOKEN no configurado. Ejecuta /aps-onboard para conectar."
-fi
+  Write-Output "[SKIP] APS_NUGET_TOKEN no configurado. Ejecuta /aps-onboard para conectar."
+}
 ```
 
 **Regla dura**: el agente **nunca** debe auto-ejecutar el setup de
