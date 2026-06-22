@@ -30,3 +30,9 @@ Thumbs.db
 *.log
 .env
 .env.local
+
+# opencode (artefactos Node.js de plugins, no commitear)
+.opencode/node_modules/
+.opencode/package.json
+.opencode/package-lock.json
+.opencode/bun.lock

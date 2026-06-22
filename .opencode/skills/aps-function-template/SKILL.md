@@ -190,13 +190,15 @@ public class SampleFunction
     <AssemblyName>{NombreProyecto}.Tests</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+    <EnableMSTestRunner>true</EnableMSTestRunner>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
-    <PackageReference Include="xunit" Version="2.9.0" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="MSTest" Version="3.6.0" />
+    <PackageReference Include="NSubstitute" Version="5.1.0" />
+    <PackageReference Include="Shouldly" Version="4.2.1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\{NombreProyecto}\{NombreProyecto}.csproj" />
@@ -211,16 +213,18 @@ public class SampleFunction
 ```csharp
 using {NombreProyecto}.Functions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Shouldly;
 
 namespace {NombreProyecto}.Tests;
 
+[TestClass]
 public class SampleFunctionTests
 {
-    [Fact]
+    [TestMethod]
     public void Constructor_Accepts_Logger()
     {
         var fn = new SampleFunction(NullLogger<SampleFunction>.Instance);
-        Assert.NotNull(fn);
+        fn.ShouldNotBeNull();
     }
 }
 ```

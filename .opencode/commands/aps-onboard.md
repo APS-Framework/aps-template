@@ -1,7 +1,8 @@
 ---
 description: Onboarding del entorno local para un proyecto APS Framework. Verifica acceso a gh CLI, detecta el repo y la org via 'gh repo view', configura APS_NUGET_TOKEN y GITHUB_TOKEN como variables de usuario, genera/actualiza NuGet.config, ajusta opencode.json (MCP discovery: conserva APS-Framework:aps-framework y anade la org del repo si es diferente), instala el paquete sdk-mcp-server si no esta presente y pregunta al usuario antes de arrancarlo. Accion EXPLICITA del usuario.
 agent: aps-onboarder
-model: minimax/MiniMax-M2.7-highspeed
+# El modelo se hereda del agent (aps-onboarder usa MiniMax-M2.7-highspeed
+# por coste/velocidad). No se especifica aqui para evitar duplicacion.
 ---
 
 # /aps-onboard
@@ -23,7 +24,8 @@ usuario puede arrancarlo despues con `sdk-mcp-server` o `pm2 start`.
 
 Tampoco **autentica contra Azure**: el acceso a Azure desde local
 nunca debe ser necesario. Las credenciales y la suscripcion las
-gestiona el workflow de deploy (`gh-actions-deploy-*.yml`).
+gestiona el workflow de deploy (ver `/aps-new-workflow`, que genera
+callers a los workflows reutilizables de `APS-Framework/.github`).
 
 ## Cuando usarlo
 
@@ -86,7 +88,7 @@ El comando opencode no expone estos flags; el script es la API completa.
 |---------|-------------------|--------|
 | `dotnet` SDK 8.x / 10.x | `aps-scaffolder` | Al crear proyecto |
 | `func` (Azure Functions Core Tools) | `aps-scaffolder` | Solo para Function Apps |
-| `az` CLI y suscripcion | workflow de deploy (GitHub Actions) | Al desplegar a Azure |
+| `az` CLI y suscripcion | workflow de deploy (GitHub Actions, ver `/aps-new-workflow`) | Al desplegar a Azure |
 | `dotnet restore` de prueba | `aps-scaffolder` | Al crear proyecto |
 
 ## Verificacion manual

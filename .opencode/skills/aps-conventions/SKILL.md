@@ -215,14 +215,28 @@ Y un `Program.cs` que los active. Ver skills `aps-function-template` y
 - Handlers de HTTP en clases separadas (no `static`), para poder testear
 - Sin emojis en el codigo fuente
 
+## Stack de tests (canonico)
+
+Todos los proyectos de tests deben usar el mismo stack:
+
+- **MSTest v3** con `<EnableMSTestRunner>true</EnableMSTestRunner>` en el csproj
+- **NSubstitute 5.x** para mocks: `Substitute.For<IInterface>()`, `.Returns(...)`, `.Received(...)`
+- **Shouldly 4.x** para assertions: `result.ShouldBe(expected)`, `action.ShouldThrow<TException>()`
+- Convencion de naming: `Metodo_Escenario_ResultadoEsperado`
+- `[TestClass]` para clases, `[TestMethod]` para metodos
+
+Las skills `aps-function-template` y `aps-webapp-template` generan el csproj y un test
+minimo siguiendo este stack. Los workers de refactor (`refactor-worker-tests`) esperan
+encontrarlo en cualquier proyecto nuevo o existente.
+
 ## Reglas duras para el agente
 
 1. **No** ejecutar `dotnet new` para reutilizar plantillas de Microsoft; usar
    solo las plantillas de `aps-function-template` o `aps-webapp-template`.
 2. **No** hacer commit ni push.
 3. **No** modificar archivos fuera del scope del comando (salvo
-   `.gitignore`, `Directory.Build.props` y `NuGet.config` en la raiz
-   si faltan y el proyecto los necesita).
+   `.gitignore`, `Directory.Build.props`, `NuGet.config` y `AGENTS.md`
+   en la raiz si faltan y el proyecto los necesita).
 4. Si el directorio destino ya existe, **abortar y avisar**.
 5. Si el proyecto destino es un repo existente con `.sln`, anadir el
    nuevo proyecto al `.sln` (`dotnet sln <sln> add <csproj>`). Si no hay

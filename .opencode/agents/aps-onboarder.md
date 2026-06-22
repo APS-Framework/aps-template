@@ -1,6 +1,12 @@
 ---
 description: Onboarding del entorno local para un proyecto APS Framework. Verifica acceso a gh CLI, detecta el repo y la org via 'gh repo view', configura APS_NUGET_TOKEN como variable de usuario, genera/actualiza NuGet.config con la org detectada y ajusta opencode.json para que el MCP discovery apunte a la org. **Este agente NO debe invocarse directamente**: solo se ejecuta a traves del command `/aps-onboard`, que aporta el contexto y la interaccion con el usuario.
 mode: subagent
+# Modelo elegido por coste/velocidad: la tarea es predominantemente mecanica
+# (parsear output estructurado de un script, ejecutar gh/pwsh, hacer preguntas
+# binarias, formatear resumen). No requiere razonamiento profundo, asi que se usa
+# el tier rapido en lugar del modelo principal. NO subir a MiniMax-M3 sin
+# justificacion: incrementa latencia y coste sin beneficio perceptible para este
+# perfil de trabajo.
 model: minimax/MiniMax-M2.7-highspeed
 temperature: 0.2
 permission:

@@ -96,10 +96,11 @@ El proyecto debe tener `NuGet.config` con la fuente APS, por ejemplo:
   <packageSources>
     <clear />
     <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
-    <add key="aps-private" value="https://pkgs.dev.azure.com/{org}/APS-Framework/_packaging/aps-private/nuget/v3/index.json" />
+    <add key="{Org}" value="https://nuget.pkg.github.com/{Org}/index.json" />
   </packageSources>
 </configuration>
 ```
 
-Ajustar la URL a la del feed real de la organizacion. Si el proyecto no
-tiene `NuGet.config`, crearlo en la raiz.
+Ajustar `{Org}` al nombre real de la organizacion en GitHub. Si el proyecto no
+tiene `NuGet.config`, crearlo en la raiz. La plantilla completa (con
+`packageSourceCredentials`) la genera `scripts/setup-nuget.ps1`.

@@ -23,8 +23,10 @@ lenguaje natural, con input minimo del usuario.
 - **Demos / proyectos de ejemplo**: viven en repos separados. Este
   template es tooling puro, no incluye proyectos `src/` ni `tests/`
   pre-creados.
-- **GitHub Actions / workflows**: el agente los crea bajo demanda
-  cuando el usuario lo necesita (p.ej. `aps-deployer` o equivalente).
+- **GitHub Actions / workflows**: el agente `aps-scaffolder` genera
+  callers minimos que invocan los workflows reutilizables de
+  [`APS-Framework/.github`](https://github.com/APS-Framework/.github)
+  cuando el usuario ejecuta `/aps-new-workflow`.
 - **Conexion automatica a ninguna organizacion**: el template es
   agnóstico del entorno. Conectar el repo con una org de GitHub es
   una decision explicita del usuario.
@@ -91,26 +93,46 @@ pm2 save
 
 | Comando | Que hace |
 | --- | --- |
-| `/aps-onboard` | Onboarding del entorno local: detecta repo/org via `gh`, configura `APS_NUGET_TOKEN` y `GITHUB_TOKEN`, genera/actualiza `NuGet.config`, ajusta `opencode.json` (MCP discovery: conserva `APS-Framework:aps-framework` y anade la org del repo si es diferente) e instala el paquete `sdk-mcp-server` desde GitHub Packages si no esta presente. **Pregunta al usuario** si quiere arrancar el MCP server; avisa si hay que reiniciar opencode. No valida `dotnet`/`func`/`az` ni Azure (lo gestiona el workflow de deploy) |
+| `/aps-onboard` | Onboarding del entorno local: detecta repo/org via `gh`, configura `APS_NUGET_TOKEN` y `GITHUB_TOKEN`, genera/actualiza `NuGet.config`, ajusta `opencode.json` (MCP discovery: conserva `APS-Framework:aps-framework` y anade la org del repo si es diferente) e instala el MCP server (`@APS-Framework/sdk-mcp-server`) si no esta presente. **Pregunta al usuario** si quiere arrancar el MCP server; avisa si hay que reiniciar opencode. No valida `dotnet`/`func`/`az` ni Azure (lo gestiona el workflow de deploy) |
 | `/aps-new-function [nombre] [desc...]` | Crea una nueva Azure Function con APS |
 | `/aps-new-webapp [nombre] [desc...]` | Crea una nueva ASP.NET Core Web App con APS |
+| `/aps-new-gateway [nombre] [desc...]` | Crea un Service Gateway (class library Refit con `APS.ServiceGateway`) |
 | `/aps-add-package <paquete>` | Anade un paquete APS a un proyecto existente |
+| `/aps-new-workflow [ci\|deploy\|all]` | Genera callers para los workflows reutilizables de APS-Framework/.github (CI+publish NuGet, deploy Functions, deploy Container Apps) |
+| `/add-feature [desc...]` | Crea una funcionalidad nueva (endpoint, servicio, job, handler, opcion de config) |
+| `/investigate-bug [desc...]` | Investiga y corrige un bug con reproduccion automatizada |
+| `/hotfix [desc...]` | Fix rapido para bugs en produccion (sin ciclo de hipotesis) |
+| `/refactor-plan [desc...]` | Analiza impacto de un refactor propuesto (read-only) |
+| `/refactor-start [desc...]` | Ejecuta un refactor con workers por capa |
+| `/refactor-verify` | Retoma un refactor interrumpido: verifica build+tests y propone commit |
 
 ## Agents opencode disponibles
 
 | Agent | Modo | Proposito | Como se invoca |
 | --- | --- | --- | --- |
 | `aps-onboarder` | subagent | Onboarding local: configura `gh` CLI, `NuGet.config` y `opencode.json` con la org detectada, e instala el MCP server (`@APS-Framework/sdk-mcp-server`). **Pregunta al usuario** antes de arrancar el server. **No debe invocarse directamente** | Solo via `/aps-onboard` |
-| `aps-scaffolder` | subagent | Crea Functions y WebApps a partir de una descripcion. Usado por `/aps-new-function`, `/aps-new-webapp` y `/aps-add-package` | Via los commands de creacion |
+| `aps-scaffolder` | subagent | Crea Functions, WebApps, Service Gateways y workflows de CI/CD a partir de una descripcion. Usado por `/aps-new-function`, `/aps-new-webapp`, `/aps-new-gateway`, `/aps-add-package` y `/aps-new-workflow` | Via los commands de creacion |
+| `refactor-orchestrator` | primary | Orquesta refactors, creacion de features, investigacion de bugs y hotfixes. Delega en workers por capa y carga skills como fuente de verdad | Via `/refactor-start`, `/add-feature`, `/investigate-bug`, `/hotfix`, `/refactor-verify` |
+| `refactor-analyzer` | subagent | Analisis de impacto read-only de un refactor propuesto. Mapea archivos afectados, evalua riesgo, recomienda estrategia | Via `/refactor-plan` |
+| `refactor-verifier` | subagent | Ejecuta `dotnet build` y `dotnet test` sobre la solucion completa. Propone commit si pasa, reporta errores si falla | Invocado por el orchestrator |
+| `refactor-worker-*` | subagent | Aplican cambios de refactor por capa: contracts, crosscutting, impl, presentation, tests. Permisos de edicion acotados a su capa | Invocados por el orchestrator |
 
 ## Skills opencode disponibles (cargadas bajo demanda)
 
 | Skill | Cuando se carga |
 | --- | --- |
 | `aps-packages` | Catalogo de paquetes APS con keywords para deteccion de intencion |
-| `aps-conventions` | Convenciones de organizacion, naming y archivos obligatorios |
+| `aps-conventions` | Convenciones de organizacion, naming, archivos obligatorios y stack de tests |
 | `aps-function-template` | Plantilla literal de archivos para Function App |
 | `aps-webapp-template` | Plantilla literal de archivos para Web App |
+| `aps-sg-template` | Plantilla literal de archivos para Service Gateway (Refit + IoCExtensions) |
+| `aps-deploy-template` | Plantillas de workflows GitHub Actions (CI, deploy, publish NuGet) |
+| `project-structure` | Detecta tipo de solucion y valida estructura antes de refactor/scaffold |
+| `add-feature` | Protocolo de creacion de features (endpoints, servicios, jobs, config) |
+| `refactor-protocol` | Protocolo de refactors multi-capa con playbooks por tipo |
+| `refactor-session` | Persistencia de sesion de refactor en `.opencode/plans/<slug>/state.md` |
+| `multi-phase-refactor` | Protocolo para refactors de alto riesgo con tests de caracterizacion |
+| `bug-investigation` | Protocolo de investigacion de bugs con reproduccion automatizada |
 
 ## Estructura del repositorio
 
@@ -120,21 +142,50 @@ pm2 save
 |   +-- agents/
 |   |   +-- aps-onboarder.md
 |   |   +-- aps-scaffolder.md
+|   |   +-- refactor-orchestrator.md
+|   |   +-- refactor-analyzer.md
+|   |   +-- refactor-verifier.md
+|   |   +-- refactor-worker-contracts.md
+|   |   +-- refactor-worker-crosscutting.md
+|   |   +-- refactor-worker-impl.md
+|   |   +-- refactor-worker-presentation.md
+|   |   +-- refactor-worker-tests.md
 |   +-- skills/
 |   |   +-- aps-packages/SKILL.md
 |   |   +-- aps-conventions/SKILL.md
 |   |   +-- aps-function-template/SKILL.md
 |   |   +-- aps-webapp-template/SKILL.md
+|   |   +-- aps-sg-template/SKILL.md
+|   |   +-- aps-deploy-template/SKILL.md
+|   |   +-- project-structure/SKILL.md
+|   |   +-- add-feature/SKILL.md
+|   |   +-- refactor-protocol/SKILL.md
+|   |   +-- refactor-session/SKILL.md
+|   |   +-- multi-phase-refactor/SKILL.md
+|   |   +-- bug-investigation/SKILL.md
 |   +-- commands/
 |       +-- aps-onboard.md
 |       +-- aps-new-function.md
 |       +-- aps-new-webapp.md
+|       +-- aps-new-gateway.md
 |       +-- aps-add-package.md
+|       +-- aps-new-workflow.md
+|       +-- add-feature.md
+|       +-- investigate-bug.md
+|       +-- hotfix.md
+|       +-- refactor-plan.md
+|       +-- refactor-start.md
+|       +-- refactor-verify.md
+|   +-- docs/
+|   |   +-- refactor-system.md
+|   +-- plans/                # estado de refactors en curso (transitorio)
+|   |   +-- .gitkeep
+|   +-- plugins/
+|   |   +-- pending-plans.ts
 +-- scripts/
 |   +-- setup-nuget.ps1
-+-- docs/
-|   +-- PLAN.md                 # catalogo de demos de referencia
-+-- opencode.json               # config MCP (sdk-mcp-server)
++-- AGENTS.md               # Layer Map contractual del proyecto
++-- opencode.json           # config MCP (sdk-mcp-server)
 +-- README.md
 +-- LICENSE
 ```
@@ -172,9 +223,10 @@ pm2 save
       para usar los agents y commands
 - [ ] Crear el primer proyecto con `/aps-new-function` o
       `/aps-new-webapp`
-- [ ] Cuando estes listo para CI/CD, pedir al agente que cree los
-      GitHub Actions (workflows de build, test, deploy). El acceso
-      a Azure se configura ahi, no en local
+- [ ] Cuando estes listo para CI/CD, ejecutar `/aps-new-workflow` para
+      que el agente genere los callers a los workflows reutilizables de
+      APS-Framework/.github. El acceso a Azure se configura con secrets
+      OIDC en GitHub, no en local
 
 ## Configuracion MCP
 
