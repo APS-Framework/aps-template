@@ -25,24 +25,28 @@ proyecto el MCP puede exponer tools diferentes.
 
 ### Convención de tiers del MCP
 
-Los paquetes APS expuestos en el MCP siguen una **convención de 4 tiers** consistente en el
-sufijo de cada tool. Conocer esta convención permite encontrar la tool correcta sin necesidad
-de conocer sus nombres exactos de antemano:
+Los paquetes APS expuestos en el MCP organizan sus tools por **tiers**. La
+convención general es:
 
-| Tier | Sufijo | Cuándo invocar |
+| Tier aproximado | Patrón de sufijo | Cuándo invocar |
 |------|--------|---------------|
-| **setup** | `*__setup`, `*__setup_functions`, `*__setup_aspnetcore` | Al registrar el paquete en DI o configurar el host builder (`Program.cs`) |
-| **api** | `*__api`, `*__api_*` | Al **generar o modificar código** que usa las interfaces del paquete. Contiene contratos, métodos y patrones de uso |
-| **sdk** | `*__readme_sdk`, `*__sdk` | Al necesitar entender qué hace el paquete, cómo instalarlo o diagnosticar un error de configuración |
-| **dev** | `*__readme_dev`, `*__dev` | Solo cuando se va a modificar el paquete internamente. No relevante en refactors de consumidores |
+| **setup** | `*__setup*` | Al registrar el paquete en DI o configurar el host builder |
+| **api** | `*__api*` | Al **generar o modificar código** que usa las interfaces del paquete |
+| **sdk** | `*__readme_sdk`, `*__sdk`, `*__docs_sdk` | Al necesitar entender qué hace el paquete o cómo instalarlo |
+| **dev** | `*__readme_dev`, `*__dev`, `*__docs_dev` | Solo cuando se va a modificar el paquete internamente |
+| **ops git/ci** | `*__git_ops`, `*__publish`, `*__deploy_*` | Operaciones de git, publicación NuGet, deploy a Azure |
+| **docs** | `*__docs`, `*__docs_sdk`, `*__docs_dev` | Generar o revisar documentación (README-sdk, README-dev) |
+| **dominio** | `*__patterns`, `*__soap`, `*__wsdl`, `*__examples`, etc. | Casos específicos del paquete |
 
-Algunos paquetes añaden tiers específicos de dominio: `*__patterns`, `*__soap`, `*__wsdl`,
-`*__ops_docs_*`, `*__examples`, `*__git_ops`, etc. Léase su descripción para identificarlos.
-
-**Las descripciones de las tools son la fuente de verdad**: cada una indica explícitamente
-su caso de uso ("SIEMPRE que se genere código de repositorios...", "Llamar cuando se publiquen
-eventos..."). No asumas que una tool específica existe en el proyecto actual; búscala por
-descripción en las tools disponibles del MCP.
+> **Esta tabla es orientativa**. Los paquetes pueden añadir tiers específicos
+> no listados aquí. **La fuente de verdad es la descripción de cada tool en
+> el MCP**: cada una indica explícitamente su caso de uso
+> ("LLAMAR para: ...", "SIEMPRE que se genere código de ...").
+>
+> **No reproducir** el contenido de las tools en los skills/agents:
+> invocar la tool y seguir sus instrucciones. Si la política del paquete
+> cambia, la tool se actualiza y los agentes leen la versión correcta en
+> runtime.
 
 ### Cuándo usa el MCP cada agente
 
@@ -53,7 +57,8 @@ descripción en las tools disponibles del MCP.
 | **Worker CrossCutting** | `api`, `sdk` | `api` para regenerar Refit clients; `sdk` para entender contratos de conectores externos |
 | **Worker Impl** | `api`, `setup`, `patterns` | `api` para interfaces; `setup` si la infraestructura cambia en DI; `patterns` para casos avanzados |
 | **Worker Presentation** | `setup_functions`, `api` | `setup_functions` para Program.cs/host; `api` para middleware y telemetría |
-| **Verifier** | tier específico (`git_ops`, etc.) | Tools de operaciones git del proyecto |
+| **Verifier** | `git_ops`, `publish`, `deploy_*` | Invoca `github__git_ops` antes de proponer commit |
+| **Scaffolder** | `setup`, `publish`, `deploy_*`, `docs_*` | Invoca tools de CI/CD y docs al generar workflows y SGs |
 
 ### Cómo descubrir la tool adecuada
 

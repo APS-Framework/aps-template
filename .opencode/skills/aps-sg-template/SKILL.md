@@ -47,7 +47,11 @@ externa. Reemplazar `{BaseRoute}` por la ruta base del API.
 
 > Si el SG publica NuGet, el `PackageId` debe coincidir con el nombre
 > under el que se publicara en GitHub Packages. El workflow de publicacion
-> se gestiona por separado (ver `AGENTS.md` tabla de Service Gateways).
+> se gestiona invocando la tool `github__publish` del MCP (ver skill
+> `aps-deploy-template`). Para generar los README-sdk.md y README-dev.md
+> del SG, invocar las tools `github__docs_sdk` y `github__docs_dev` del
+> MCP respectivamente — son la fuente de verdad para el formato y
+> contenido de estos archivos.
 
 ---
 
